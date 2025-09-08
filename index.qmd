@@ -1,0 +1,38 @@
+---
+title: "Hi! I’m Wendy Fung-Wu 👋"
+---
+
+I’m a graduate student at CUNY Baruch College majoring in **Business Analyst** concentration in **Data Analyst**. I’m passionate about blending _technology, culture, and leadership_, and I believe every project is an opportunity to bring people together to achieve something meaningful.
+
+📌 Feel free to connect with me in [LinkedIn](https://www.linkedin.com/in/wendy-fungwu) or shoot me an [email](mailto:wendyfungwu@outlook.com)!  
+
+[📄 View My Resume](https://drive.google.com/file/d/1uvrLePLWDyGHBPuVF5yNMyNIye_MKAfE/view?usp=sharing){.btn .btn-primary target="_blank"}
+
+```{r}
+#| include: false
+1+1
+```
+--------------
+Last Updated: `r format(Sys.time(), "%A %m %d, %Y at %H:%M%p")`
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+
+if(!require("leaflet")){
+    options(repos=c(CRAN="https://cloud.r-project.org"))
+    install.packages("leaflet")
+    stopifnot(require("leaflet"))
+}
+
+baruch_longitude <- -73.98333
+baruch_latitude  <- +40.75028
+
+leaflet() |>
+  addTiles() |>
+  setView(baruch_longitude, baruch_latitude, zoom=17) |>
+  addPopups(baruch_longitude, baruch_latitude, 
+            "I am a Master's student at <b>Baruch College</b>!")
+```
+

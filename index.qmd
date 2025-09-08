@@ -13,7 +13,6 @@ I’m a graduate student at CUNY Baruch College majoring in **Business Analyst**
 1+1
 ```
 --------------
-Last Updated: `r format(Sys.time(), "%A %m %d, %Y at %H:%M%p")`
 
 ```{r}
 #| echo: false
@@ -36,3 +35,4 @@ leaflet() |>
             "I am a Master's student at <b>Baruch College</b>!")
 ```
 
+Last Updated: `r format(Sys.time(), "%A %m %d, %Y at %H:%M%p")`

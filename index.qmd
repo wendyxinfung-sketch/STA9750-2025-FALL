@@ -8,7 +8,7 @@ I’m a graduate student at CUNY Baruch College majoring in **Business Analyst**
 
 📌 Feel free to connect with me in [LinkedIn](https://www.linkedin.com/in/wendy-fungwu) or shoot me an [email](mailto:wendyfungwu@outlook.com)!  
 
-[📄 View My Resume](https://drive.google.com/file/d/1uvrLePLWDyGHBPuVF5yNMyNIye_MKAfE/view?usp=sharing){.btn .btn-primary target="_blank"}
+[📄 View My Resume](images/Wendy's Resume4.pdf){.btn .btn-primary target="_blank"}
 
 ```{r}
 #| include: false

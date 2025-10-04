@@ -65,7 +65,7 @@ total_shows <- GLOBAL_TOP_10 |> distinct(show_title) |> nrow()
 ```
 
 ```{r}
-# Top 20 Table
+# Top 10 Table
 GLOBAL_TOP_10 |> 
   mutate(`Runtime_(Minutes)` = round(60 * runtime)) |>
   select(-season_title, -runtime) |>

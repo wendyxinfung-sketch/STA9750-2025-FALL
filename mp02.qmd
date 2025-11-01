@@ -928,7 +928,7 @@ options = list(pageLength = 15)
 DT::formatRound(c("permits_per_1k","inst_index_100_first"), 1) %>%
 DT::formatCurrency(c("new_housing_units_permitted","population"), currency = "", digits = 0)
 
-# -------------------- Rate-based (permits per 1,000 new residents over last 5y) --------------------
+# Rate-based (permits per 1,000 new residents over last 5y)
 
 rate_latest <- max(HG$year[is.finite(HG$rate_index_100_first)], na.rm = TRUE)
 rate_tbl <- HG %>%
@@ -1018,163 +1018,263 @@ These metros perform well on both dimensions—high current permitting and good 
 :::
 
 ## Task 6: Visualization
+
 ```{r}
-# Packages
+# Visual 1:
 
-if (!requireNamespace("tidyverse", quietly=TRUE)) install.packages("tidyverse")
-if (!requireNamespace("ggrepel", quietly=TRUE))   install.packages("ggrepel")
-if (!requireNamespace("DT", quietly=TRUE))        install.packages("DT")
+if (!exists("RB") || !exists("HG") || !exists("HOUSEHOLDS")) {
+  stop("This chunk needs RB, HG, and HOUSEHOLDS created earlier.")
+}
 
-library(dplyr); library(stringr); library(tidyr); library(ggplot2); library(ggrepel); library(DT); library(scales)
+if (!requireNamespace("tidyverse", quietly = TRUE)) install.packages("tidyverse")
+if (!requireNamespace("ggrepel",  quietly = TRUE)) install.packages("ggrepel")
+library(dplyr); library(stringr); library(ggplot2); library(ggrepel); library(scales)
 
-# Years available (2020 excluded earlier)
+# 1) Build CBSA-year frame with both indices
+if (!exists("yimby_data")) {
+  HG_yearly <- HG %>%
+    mutate(composite_housing_index = rowMeans(
+      cbind(inst_index_100_first, rate_index_100_first), na.rm = TRUE
+    )) %>%
+    select(CBSA, year, composite_housing_index)
 
-years_available <- sort(unique(RB$year))
-stopifnot(length(years_available) >= 5)
+  yimby_data <- RB %>%
+    mutate(CBSA = as.integer(GEOID),
+           rent_burden_index = rb_index_100_first) %>%
+    select(GEOID, NAME, CBSA, year, rent_burden_index) %>%
+    left_join(HG_yearly, by = c("CBSA","year")) %>%
+    left_join(HOUSEHOLDS %>% select(GEOID, year, households),
+              by = c("GEOID","year"))
+}
 
-# Define "early" and "late" periods as first/last 3 available years
+# 2) Aggregate 2019–2023 averages per CBSA
+viz <- yimby_data %>%
+  filter(year >= 2019) %>%
+  group_by(GEOID, NAME) %>%
+  summarise(
+    avg_rb = mean(rent_burden_index, na.rm = TRUE),
+    avg_hg = mean(composite_housing_index, na.rm = TRUE),
+    hh_wt  = sum(households, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  filter(is.finite(avg_rb), is.finite(avg_hg), hh_wt > 0) %>%
+  mutate(NAME_short = str_replace(NAME, ",.*", ""))
 
-early_years <- head(years_available, 3)
-late_years  <- tail(years_available, 3)
+# 3) Household-weighted national means (dashed lines)
+rb_line <- weighted.mean(viz$avg_rb, w = viz$hh_wt, na.rm = TRUE)
+hg_line <- weighted.mean(viz$avg_hg, w = viz$hh_wt, na.rm = TRUE)
 
-# --- Rent burden summaries (index = 100 is national baseline in first year) ---
-
-rb_summary <- RB %>%
-group_by(GEOID, NAME) %>%
-summarise(
-rb_early  = mean(rb_index_100_first[year %in% early_years], na.rm = TRUE),
-rb_late   = mean(rb_index_100_first[year %in% late_years],  na.rm = TRUE),
-rb_change = rb_late - rb_early,   # negative = improvement
-.groups = "drop"
-)
-
-# --- Population growth over the study window (first vs last observed) ---
-
-pop_summary <- POPULATION %>%
-arrange(GEOID, year) %>%
-group_by(GEOID, NAME) %>%
-summarise(
-pop_first = population[which.min(year)],
-pop_last  = population[which.max(year)],
-pop_growth      = pop_last - pop_first,
-pop_growth_pct  = (pop_last - pop_first) / pmax(pop_first, 1),
-.groups = "drop"
-)
-
-# --- Housing growth (median across years of the two indices, then averaged) ---
-
-# HG exists from Task 5; add CBSA -> NAME mapping
-
-hg_summary <- HG %>%
-group_by(CBSA) %>%
-summarise(
-hg_inst_med = median(inst_index_100_first, na.rm = TRUE),
-hg_rate_med = median(rate_index_100_first, na.rm = TRUE),
-hg_index    = rowMeans(cbind(hg_inst_med, hg_rate_med), na.rm = TRUE),
-.groups = "drop"
-) %>%
-left_join(CBSA_LOOKUP, by = "CBSA") %>%
-select(GEOID, NAME, CBSA, hg_inst_med, hg_rate_med, hg_index)
-
-# --- Combine all metrics ---
-
-metrics <- rb_summary %>%
-left_join(pop_summary, by = c("GEOID","NAME")) %>%
-left_join(hg_summary,  by = c("GEOID","NAME"))
-
-# Thresholds (tunable):
-
-# "Relatively high" early burden = at/above 60th percentile of early RB
-
-high_early_cut <- quantile(metrics$rb_early, 0.60, na.rm = TRUE)
-
-# "Above-average" housing growth = at/above median across CBSAs
-
-hg_median_overall <- median(metrics$hg_index, na.rm = TRUE)
-
-# Flag the 4 conditions
-
-metrics <- metrics %>%
-mutate(
-cond_high_early_rb = rb_early >= high_early_cut,
-cond_rb_decrease   = rb_change < -2,          # >2 index-point improvement
-cond_pop_growth    = pop_growth > 0,
-cond_hg_above_avg  = hg_index >= hg_median_overall,
-YIMBY = cond_high_early_rb & cond_rb_decrease & cond_pop_growth & cond_hg_above_avg
-)
-
-# Keep a tidy shortlist
-
-yimby_shortlist <- metrics %>%
-filter(YIMBY) %>%
-arrange(rb_change, desc(hg_index)) %>%
-mutate(
-`RB Early` = round(rb_early, 1),
-`RB Late`  = round(rb_late,  1),
-`RB Δ (Late–Early)` = round(rb_change, 1),
-`Pop Growth %` = percent(pop_growth_pct, accuracy = 0.1),
-`HG Index` = round(hg_index, 1)
-) %>%
-select(NAME, `RB Early`, `RB Late`, `RB Δ (Late–Early)`, `Pop Growth %`, `HG Index`)
-
-#Visual 1
-# --- Robustify & replot Visual #1 ---
-library(dplyr); library(ggplot2); library(ggrepel); library(scales)
-
-# 1) Cap extreme HG values (winsorize at 99th pct) and tidy flags
-p99 <- quantile(metrics$hg_index, 0.99, na.rm = TRUE)
-
-plot_df <- metrics %>%
+# 4) Classify quadrants
+viz <- viz %>%
   mutate(
-    hg_index_capped = pmin(hg_index, p99),
-    YIMBY = tidyr::replace_na(YIMBY, FALSE),        # drop "NA" legend entry
-    pop_growth_pct_pos = pmax(pop_growth_pct, 0)    # size should be nonnegative
+    quadrant = case_when(
+      avg_rb >= rb_line & avg_hg >= hg_line ~ "High Rent, High Growth (YIMBY Success)",
+      avg_rb >= rb_line & avg_hg <  hg_line ~ "High Rent, Low Growth (NIMBY)",
+      avg_rb <  rb_line & avg_hg >= hg_line ~ "Low Rent, High Growth",
+      TRUE                                  ~ "Low Rent, Low Growth"
+    )
   )
 
-# 2) Pick a few candidates to label (top housing growth among YIMBYs)
-label_rows <- plot_df %>%
-  filter(YIMBY) %>%
-  slice_max(hg_index, n = 10)
+# 5) Cap extreme outliers so the cloud is readable
+x_lo <- quantile(viz$avg_rb, 0.01, na.rm = TRUE)
+x_hi <- quantile(viz$avg_rb, 0.99, na.rm = TRUE)
+y_lo <- quantile(viz$avg_hg, 0.01, na.rm = TRUE)
+y_hi <- quantile(viz$avg_hg, 0.99, na.rm = TRUE)
 
-# 3) Plot
-ggplot(plot_df, aes(x = rb_change, y = hg_index_capped)) +
-  geom_vline(xintercept = 0, linetype = "dotted", linewidth = 0.4) +
-  geom_hline(yintercept = median(plot_df$hg_index_capped, na.rm = TRUE),
-             linetype = "dashed", linewidth = 0.4) +
-  geom_point(aes(size = pop_growth_pct_pos, color = YIMBY), alpha = 0.75) +
-  ggrepel::geom_text_repel(
-    data = label_rows,
-    aes(label = stringr::str_replace(NAME, ",.*", "")),
-    size = 3, min.segment.length = 0, max.overlaps = 20, seed = 42
-  ) +
-  scale_size_area(
-    name = "Population growth (%)",
-    max_size = 10,
-    labels = percent_format(accuracy = 1)
-  ) +
+viz_cap <- viz %>%
+  mutate(
+    x = pmin(pmax(avg_rb, x_lo), x_hi),
+    y = pmin(pmax(avg_hg, y_lo), y_hi),
+    dist2 = (avg_rb - rb_line)^2 + (avg_hg - hg_line)^2
+  )
+
+# 6) Pick a few labels per quadrant (furthest from center within caps)
+labels_df <- viz_cap %>%
+  group_by(quadrant) %>%
+  slice_max(dist2, n = 5, with_ties = FALSE) %>%
+  ungroup()
+
+# 7) Background shading (intersect with axis limits)
+shade <- tibble::tibble(
+  xmin = c(max(rb_line, x_lo), max(rb_line, x_lo), x_lo,          x_lo),
+  xmax = c(x_hi,               x_hi,               min(rb_line,x_hi), min(rb_line,x_hi)),
+  ymin = c(max(hg_line, y_lo), y_lo,               max(hg_line,y_lo), y_lo),
+  ymax = c(y_hi,               min(hg_line,y_hi),  y_hi,              min(hg_line,y_hi)),
+  fill = c("#1b9e7715", "#d95f0215", "#377eb815", "#80808015")
+)
+
+# 8) Counts for each quadrant (printed on the chart)
+counts <- viz %>% count(quadrant, name = "n")
+pos_df <- tibble::tibble(
+  quadrant = c("High Rent, High Growth (YIMBY Success)",
+               "High Rent, Low Growth (NIMBY)",
+               "Low Rent, High Growth",
+               "Low Rent, Low Growth"),
+  x = c(x_hi - 0.5, x_hi - 0.5, x_lo + 0.5, x_lo + 0.5),
+  y = c(y_hi - 0.5, y_lo + 0.5, y_hi - 0.5, y_lo + 0.5),
+  hjust = c(1,1,0,0), vjust = c(1,0,1,0)
+) %>% left_join(counts, by = "quadrant")
+
+# 9) Single, cleaner chart
+ggplot(viz_cap, aes(x = x, y = y)) +
+  # quadrant shading & reference lines
+  geom_rect(data = shade,
+            aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
+            inherit.aes = FALSE, fill = shade$fill, color = NA) +
+  geom_hline(yintercept = hg_line, linetype = "dashed", color = "gray55") +
+  geom_vline(xintercept = rb_line, linetype = "dashed", color = "gray55") +
+  # points (outlined for legibility)
+  geom_point(aes(color = quadrant), alpha = 0.85, size = 2.6, stroke = 0.25) +
+  # labels for a few exemplars
+  geom_text_repel(data = labels_df, aes(label = NAME_short),
+                  size = 3, max.overlaps = 40, min.segment.length = 0, seed = 42) +
+  # counts
+  geom_text(data = pos_df,
+            aes(x = x, y = y, label = paste0(n, " CBSAs"),
+                hjust = hjust, vjust = vjust),
+            inherit.aes = FALSE, fontface = "bold", size = 3.2) +
+  scale_x_continuous(limits = c(x_lo, x_hi), labels = label_number(accuracy = 1)) +
+  scale_y_continuous(limits = c(y_lo, y_hi), labels = label_comma(accuracy = 1)) +
   scale_color_manual(
-    name = "YIMBY candidate?",
-    values = c(`TRUE` = "#1b9e77", `FALSE` = "#b3b3b3")
+    values = c("High Rent, High Growth (YIMBY Success)" = "#1b9e77",
+               "High Rent, Low Growth (NIMBY)"         = "#d95f02",
+               "Low Rent, High Growth"                 = "#377eb8",
+               "Low Rent, Low Growth"                  = "#7f7f7f"),
+    name = "Category"
   ) +
-  coord_cartesian(ylim = c(0, p99)) +
   labs(
-    title = "Where rent burden eased and housing growth ran above average",
+    title = "Rent Burden vs Housing Growth — recent average (2019–2023)",
     subtitle = paste0(
-      "Upper-left is best: rent burden fell (x<0) and housing growth is high (y above dashed). ",
-      "Y-axis capped at P99 = ", round(p99, 1), " to reduce outlier distortion."
+      "Dashed lines = household-weighted national means (RB ≈ ",
+      round(rb_line, 1), ", HG ≈ ", round(hg_line, 1),
+      "). Axes capped at P1–P99 to reduce outlier distortion."
     ),
-    x = "Change in Rent Burden Index (Late – Early)  — negative = improved affordability",
-    y = "Housing Growth Index (median of permitting indices)",
-    caption = "RB Index baseline = 100 at national household-weighted average in first study year."
+    x = "Rent Burden Index",
+    y = "Housing Growth Index",
+    caption = "Sources: ACS (tidycensus) & BLS QCEW; indices from Tasks 4–5"
   ) +
   theme_minimal(base_size = 12) +
   theme(
-    legend.box = "vertical",
+    legend.position = "bottom",
+    legend.title = element_blank(),
     panel.grid.minor = element_blank()
-  )
+  ) +
+  guides(color = guide_legend(ncol = 2))
+
 ```
-**YIMBY wins:** Valdosta, Wilmington, Tallahassee, Las Cruces, Salisbury, Brownsville–Harlingen, Missoula, Jonesboro — show falling rent burden, above-median permitting, and*population growth.\n"
+**YIMBY response (high rent, high growth)**: Salisbury; Myrtle Beach–Conway–North Myrtle Beach — strong permitting where rent burden is high.\n
 
-**Standout outlier:** New Bern has an exceptionally high Housing Growth Index with slight rent-burden improvement → strong supply response relative to demand.\n"
+**Healthy builders (low rent, high growth)**: Pittsburgh;Albany–Schenectady–Troy; Louisville–Jefferson County — building while keeping rents below average.\n
 
+**NIMBY risk (high rent, low growth)**: Vineland–Bridgeton cluster — weak permitting with high rent burden.\n
 
+```{r}
+# Visual 2
+
+if (!requireNamespace("tidyverse", quietly = TRUE)) install.packages("tidyverse")
+library(dplyr); library(ggplot2); library(stringr); library(scales)
+
+# Pick a metro to highlight (uses yours if already set)
+if (!exists("target_cbsa_name")) {
+  target_cbsa_name <- "New York-Newark-Jersey City, NY-NJ-PA Metro Area"
+}
+
+# 1) Per-year distribution + national weighted average
+rb_stats <- RB %>%
+  group_by(year) %>%
+  summarise(
+    us_weighted_avg = weighted.mean(rb_index_100_first, w = households, na.rm = TRUE),
+    p25 = quantile(rb_index_100_first, 0.25, na.rm = TRUE),
+    p75 = quantile(rb_index_100_first, 0.75, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# 2) Highlighted metro time series
+metro_ts <- RB %>%
+  filter(NAME == target_cbsa_name) %>%
+  arrange(year) %>%
+  select(year, rb_index_100_first)
+
+last_year <- max(RB$year, na.rm = TRUE)
+
+ggplot() +
+  # IQR ribbon across metros
+  geom_ribbon(data = rb_stats,
+              aes(x = year, ymin = p25, ymax = p75),
+              fill = "#cbd5e1", alpha = 0.6) +
+  # National weighted average
+  geom_line(data = rb_stats,
+            aes(year, us_weighted_avg),
+            linewidth = 1.1, color = "#0f766e") +
+  # Highlighted metro
+  geom_line(data = metro_ts,
+            aes(year, rb_index_100_first),
+            linewidth = 1.1, color = "#1d4ed8") +
+  # Baseline = 100 in first study year
+  geom_hline(yintercept = 100, linetype = "dashed", color = "gray55") +
+  labs(
+    title = "Rent Burden Index Over Time",
+    subtitle = paste0(
+      "Shaded band = interquartile range across CBSAs. ",
+      "Lines: US weighted average (green) vs. ",
+      str_replace(target_cbsa_name, ",.*", ""), " (blue)."
+    ),
+    x = NULL,
+    y = "Rent Burden Index (100 = national baseline in first year)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    panel.grid.minor = element_blank()
+  ) +
+  coord_cartesian(xlim = c(min(rb_stats$year, na.rm = TRUE), last_year))
+```
+**The US household-weighted average** rent burden stays above the 100 baseline by the most recent year, indicating rents have grown slightly faster than incomes nationwide.\n
+
+**The IQR ribbon** shows meaningful cross-metro dispersion—affordability pressure is not uniform and varies widely by CBSA.\n
+
+**The highlighted metro** tracks close to the national trend but remains on the higher side of the distribution in recent years, signaling persistent rent pressure despite some year-to-year easing.\n
+
+**Overall**, the pattern suggests moderate national strain with large local differences, consistent with supply and income dynamics varying across markets.\n
+
+## Task 7: Policy Brief - Federal YIMBY Housing Program
+*Making Rent Affordable for More Families*  
+
+### 1. Proposed Sponsors  
+
+#### Primary Sponsor (YIMBY Success Story)  
+A representative from **Myrtle Beach-Conway-North Myrtle Beach, SC**.  
+This area has high rents but builds lots of new housing—keeping up with population growth. It shows YIMBY policies work.  
+
+#### Co-Sponsor (Needs YIMBY Help)  
+A representative from **Vineland-Bridgeton, NJ**.  
+This area has high rents but builds very little new housing. More housing here would lower costs for families.  
+
+### 2. Local Groups to Rally Support  
+
+#### Registered Nurses  
+- Both areas have big hospitals that need nurses.  
+- In Myrtle Beach: More housing keeps rent low, so nurses spend less on housing.  
+- In Vineland-Bridgeton: More housing would ease rent burdens, letting nurses save money.  
+
+#### Retail Workers  
+- Retail jobs are common in both areas.  
+- In Myrtle Beach: Affordable housing brings more workers, fixing store staffing shortages.  
+- In Vineland-Bridgeton: Lower rent means people spend more at local shops—helping retail workers get more hours.  
+
+### 3. Simple Metrics for Funding  
+
+#### Rent Burden Index  
+- Shows how much of a household’s income goes to rent.  
+- 100 = national average. Scores above 100 mean families spend more on rent than most.
+
+#### Housing Growth Index  
+- Tracks how many new homes are built (for every 1,000 people) and if they keep up with population growth.  
+- 100 = national average. Scores above 100 mean an area is building enough housing.  
+
+### 4. Why This Bill Helps  
+- Myrtle Beach: Gets support to keep building affordable homes.  
+- Vineland-Bridgeton: Gets help to build more, lowering rent for families.  
+- Everyone: Less money on rent means more for food, doctors, and local businesses. 
+
+**LET'S MAKE BACKYARDS AFFRORDABLE FOR ALL!**

@@ -4,3 +4,8 @@
 .Ruserdata
 
 /.quarto/
+pbpaste >> .gitignore
+
+cat .gitignorepbpaste >> .gitignore
+
+cat .gitignore

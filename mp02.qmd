@@ -269,6 +269,38 @@ state_df <- tibble::tibble(
   name = c(state.name, "District of Columbia", "Puerto Rico")
 )
 ```
+## Extra Credit Opportunity #01: Relationship Diagram
+![](images/extracredit1.png){fig-cap="Albuquerque permits peak year" fig-alt="Bar chart of permits in Albuquerque by year" width=100% fig-align="center"}
+
+### Entities in the ERD and their roles
+- `POPULATION(GEOID, NAME, population, year)` → metro size and 5-year growth base.\n
+
+- `HOUSEHOLDS(GEOID, NAME, households, year)` → weights for national averages and RB baseline.\n
+
+- `INCOME(GEOID, household_income, year)` + `RENT(GEOID, monthly_rent, year)` → inputs to **Rent Burden (RB)**.\n
+
+- `PERMITS(GEOID, year, building_permits)` → supply flow; used in **Housing Growth (HG)**.\n
+
+- `WAGES(FIPS, YEAR, EMPLOYMENT, INDUSTRY)` + `INDUSTRY_CODES(INDUSTRY, description)` → occupations & allies for the **policy brief**.\n
+
+> **Primary keys** (composite):\n
+> `POPULATION/HOUSEHOLDS/INCOME/RENT`: `(GEOID, year)` 
+• `PERMITS`: `(GEOID, year)`\n
+• `WAGES`: `(FIPS, YEAR, INDUSTRY)`\n
+• `INDUSTRY_CODES`: `(INDUSTRY)`\n
+
+### Join pathways (how tables connect)
+
+- **ACS core joins**: `INCOME`, `RENT`, `POPULATION`, `HOUSEHOLDS` join on **`(GEOID, year)`**.\n
+
+- **Permits to ACS**:  
+  - If `PERMITS` already has `GEOID` (as in the ERD), join directly on `(GEOID, year)`.\n
+  
+  - If source has CBSA codes, map CBSA→`GEOID` via a lookup; then join as above.\n
+  
+- **WAGES to ACS**: BLS uses `FIPS` like `C3562`. Create `std_cbsa = FIPS || "0"` so `C3562 → C35620`, which equals `"C" + GEOID`; link to ACS via a CBSA/GEOID lookup.\n
+
+- **Year coverage**: ACS & QCEW **omit 2020** → use intersecting years only in joins and summaries.\n
 
 # Task 2: Multi-Table Questions
 

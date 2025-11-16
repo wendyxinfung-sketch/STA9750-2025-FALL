@@ -895,3 +895,75 @@ Implementation of the Dead Street Tree Removal and Replacement Program in Counci
 - **Promote equity in urban forestry investments** by directing resources to a district with both a substantial proportion of dead trees and intensive daily use by residents and businesses.
 
 Overall, this initiative would represent a focused, data-driven investment in the resilience, safety, and livability of Council District `r focus_district` and its communities in `r focus_borough`.
+
+## Extra Credit Opportunity #01 — Improved Tree Map Visualizations
+```{r}
+#| label: extra-credit-interactive-map
+#| message: false
+#| warning: false
+
+if (!requireNamespace("leaflet", quietly = TRUE)) {
+install.packages("leaflet")
+}
+library(leaflet)
+library(sf)
+library(dplyr)
+
+if (is.na(sf::st_crs(trees_sf))) {
+sf::st_crs(trees_sf) <- 4326
+}
+
+set.seed(9750)
+
+# FIXED: use nrow(trees_sf) instead of n()
+
+trees_map <- trees_sf |>
+dplyr::slice_sample(n = min(50000, nrow(trees_sf)))
+
+coords <- sf::st_coordinates(trees_map)
+
+trees_map_df <- trees_map |>
+sf::st_drop_geometry() |>
+mutate(
+lon   = coords[, "X"],
+lat   = coords[, "Y"],
+popup = paste0(
+"<b>Species:</b> ", spc_common, "<br>",
+"<b>Status:</b> ", status, "<br>",
+"<b>Borough:</b> ", boroname
+)
+)
+
+districts_wgs <- sf::st_transform(council_districts, 4326)
+
+leaflet(options = leafletOptions(preferCanvas = TRUE)) |>
+addProviderTiles("CartoDB.Positron") |>
+addPolygons(
+data   = districts_wgs,
+color  = "#444444",
+weight = 1,
+fill   = FALSE,
+opacity = 0.8,
+group  = "Council Districts",
+label  = ~paste("District", CounDist)
+) |>
+addCircleMarkers(
+data    = trees_map_df,
+lng     = ~lon,
+lat     = ~lat,
+radius  = 2,
+stroke  = FALSE,
+fillOpacity   = 0.6,
+popup         = ~popup,
+group         = "Street Trees",
+clusterOptions = markerClusterOptions(
+spiderfyOnMaxZoom   = TRUE,
+showCoverageOnHover = FALSE,
+zoomToBoundsOnClick = TRUE
+)
+) |>
+addLayersControl(
+overlayGroups = c("Council Districts", "Street Trees"),
+options       = layersControlOptions(collapsed = FALSE)
+)
+```

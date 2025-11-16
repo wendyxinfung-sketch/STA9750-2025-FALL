@@ -1,5 +1,5 @@
 ---
-title: "Mini Project 3:  "
+title: "Mini Project 3: Visualizing and Maintaining the Green Canopy of NYC "
 author: "Wendy Fung-Wu"
 site-url: "https://wendyxinfung-sketch.github.io/STA9750-2025-FALL/mp03.html"
 format: 
@@ -17,7 +17,8 @@ execute:
    echo: true
 ---
 
-##Introduction
+## Introduction
+**New York City’s street trees** are a critical component of its urban infrastructure.They provide shade, reduce urban heat, improve air quality, absorb stormwater, and contribute to the aesthetic and social quality of dense neighborhoods. However, the benefits of this “green canopy” are not distributed evenly across the city, and many trees are aging, damaged, or dead.Identifying where trees are located—and how their condition varies across neighborhoods—is an essential step toward making informed and equitable investment decisions.
 
 
 ## Data Acquisition

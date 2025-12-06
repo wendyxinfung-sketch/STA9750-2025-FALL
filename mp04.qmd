@@ -1099,11 +1099,10 @@ The table shows that months with **large underlying CES level changes** have not
 On August 1, 2025, President Donald Trump alleged that the BLS leadership manipulated or “rigged” jobs numbers for political advantage. This accusation appeared in the public controversy surrounding CES revisions and the firing of BLS Commissioner **Erika McEntarfer** after a weak jobs report and notable downward adjustments. 
 
 #### Why this claim is testable with our data
-A claim of “rigged” or politically manipulated CES revisions implies a **systematic, non-random pattern** in the direction or magnitude of revisions.  
-Using our historical CES level and first-to-third revision data, we can test for measurable signatures of political bias, such as:
+A claim of “rigged” or politically manipulated CES revisions implies a **systematic, non-random pattern** in the direction or magnitude of revisions.Using our historical CES level and first-to-third revision data, we can test for measurable signatures of political bias, such as:
 
 1. **Election-year upward skew** in revisions,  
-2. **Consistent partisan differences** in revision direction or size, or  
+2. **Consistent partisan differences** in revision direction or size.
 3. **Unusually large revisions relative to the employment base** concentrated in politically sensitive periods.
 
 #### Evidence from Task 3 (numbers)
@@ -1120,8 +1119,7 @@ These statistics indicate that while revisions can appear large in headlines, th
 #### Evidence from Task 3 (visuals)
 
 **Visualization A (Task 3 Q2): Share of positive revisions by year**  
-This plot is relevant because a politically “rigged” process tied to elections would likely show **repeated election-era spikes** in positive revisions.  
-Instead, the pattern appears **volatile and mixed year-to-year**, which is more consistent with normal statistical updating under changing economic conditions than a stable political signal.
+This plot is relevant because a politically “rigged” process tied to elections would likely show **repeated election-era spikes** in positive revisions. Instead, the pattern appears **volatile and mixed year-to-year**, which is more consistent with normal statistical updating under changing economic conditions than a stable political signal.
 
 **Visualization B (Task 3 Q4): Absolute |revision| as % of employment level by decade**  
 This plot directly addresses the “scale” argument behind manipulation claims. Even when revision counts are tens of thousands, the proportional impact is generally small across decades. The rise in the 2020s aligns more plausibly with **pandemic-era volatility** than with a new, sustained political distortion.
@@ -1133,8 +1131,7 @@ To test the most direct measurable implication of the claim (election-driven upw
 - **H0:** Mean revision in election years ≤ mean revision in non-election years  
 - **H1:** Mean revision in election years > mean revision in non-election years
 
-If the alleged political rigging were detectable in historical data, we would expect evidence supporting **H1**.  
-However, our election-year test does **not** provide strong statistical support for an election-year upward bias in revisions (p-value not small enough to reject H0). This outcome aligns with the Task 3 visuals showing no persistent election-linked pattern.
+If the alleged political rigging were detectable in historical data, we would expect evidence supporting **H1**.However, our election-year test does **not** provide strong statistical support for an election-year upward bias in revisions (p-value not small enough to reject H0). This outcome aligns with the Task 3 visuals showing no persistent election-linked pattern.
 
 #### Verdict (Politifact-style)
 **Rating: False**  
@@ -1153,8 +1150,8 @@ This claim does not merely say revisions exist (which is expected for survey-bas
 
 If this concern were strongly supported by measurable patterns, we might expect to observe:
 
-1. A **clear increase** in average or typical revision size in the post-2020 period, or
-2. A **structural jump** in revision size when scaled to the employment base, or
+1. A **clear increase** in average or typical revision size in the post-2020 period.
+2. A **structural jump** in revision size when scaled to the employment base.
 3. Evidence that revision patterns reflect a **systematic breakdown** rather than volatility-driven noise.
 
 #### Evidence from Task 3 (numbers)
@@ -1180,7 +1177,7 @@ Together, these visuals support a more cautious interpretation: **revisions rose
 #### Evidence from Task 4 (hypothesis test)
 A direct statistical check of Antoni’s core implication can reuse the post-pandemic comparison:
 
-* **Task 4 Q4:** *Has the average revision increased post-2020?*
+**Task 4 Q4:** *Has the average revision increased post-2020?*
 
 This test is aligned with the claim because suspending monthly reporting implies that **recent revisions have become systematically worse**. In the analysis, the post-2020 mean does **not** appear to be higher than the pre-2020 mean, and the inferential result does not provide strong evidence of a sustained post-2020 increase in average revisions. This weakens the argument that the monthly report is broadly “too unreliable to publish.”
 

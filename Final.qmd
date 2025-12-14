@@ -1,7 +1,7 @@
 ---
 title: "Data Miners - Wendy's Individual Report "
 author: "Wendy Fung-Wu"
-site-url: "https://wendyxinfung-sketch.github.io/STA9750-2025-FALL/final.html"
+site-url: "https://wendyxinfung-sketch.github.io/STA9750-2025-FALL/Final.html"
 format: 
  html:
    theme: minty
@@ -216,18 +216,29 @@ g1_coverage <- ggplot(coverage_df, aes(y = reorder(borough, traffic_days))) +
                linewidth = 6, alpha = 0.8, lineend = "round") +
   geom_text(aes(x = date_max, label = paste0("  n=", traffic_days)),
             hjust = 0, size = 4) +
-  scale_color_viridis_c(option = "C") +
+  scale_color_viridis_c(
+    option = "C",
+    name   = "Traffic-observed days (count)",
+    breaks = c(70, 90, 110, 130),
+    labels = c("70 days", "90 days", "110 days", "130 days")
+  ) +
+  guides(color = guide_colorbar(
+    title.position = "top",
+    barwidth = 12,
+    barheight = 0.6
+  )) +
   scale_x_date(date_breaks = "2 months", date_labels = "%b") +
   labs(
     title = "Graph 1: Traffic Data Coverage by Borough (2024)",
     subtitle = "Traffic-observed days are uneven (important limitation)",
-    x = NULL, y = NULL, color = "Traffic days"
+    x = NULL, y = NULL
   ) +
   theme_minimal(base_size = 13) +
   theme(legend.position = "bottom") +
   expand_limits(x = max(coverage_df$date_max) + 25)
 
 g1_coverage
+
 ```
 ### 1) Data coverage is uneven (Graph 1)
 

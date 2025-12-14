@@ -1,0 +1,456 @@
+---
+title: "Data Miners - Wendy's Individual Report "
+author: "Wendy Fung-Wu"
+site-url: "https://wendyxinfung-sketch.github.io/STA9750-2025-FALL/final.html"
+format: 
+ html:
+   theme: minty
+   toc: true
+   toc-depth: 3
+   code-fold: true
+   code-summary: "Show code"
+   embed-resources: true
+editor: visual
+execute: 
+   warning: false
+   message: false
+   echo: true
+---
+## Introduction
+
+This individual report addresses my team’s broader project question:
+
+**Group question:** *How do traffic patterns across NYC relate to different types of 311 complaints that reflect residents’ quality of life?*
+
+Within that umbrella, my individual responsibility focuses on a specific and testable relationship between traffic activity and two traffic-adjacent quality-of-life complaints:
+
+**My individual question:** *Do higher traffic volumes correlate with more noise complaints (specifically “Noise – Street/Sidewalk” and “Noise – Vehicle”) across boroughs?*
+
+This is a practical question. Intuitively, more traffic can mean more engine sound, honking, congestion-related idling, and more street activity, all of which could plausibly generate (or at least coincide with) more noise complaints. However, the relationship is not guaranteed. Noise complaints reflect both the presence of noise and the likelihood of residents reporting it—reporting behavior can vary by neighborhood characteristics, housing density, expectations about noise, and enforcement patterns. For that reason, a simple “traffic goes up → complaints go up” story might not hold consistently across boroughs or across time.
+
+To answer the question using a reproducible workflow, I build a borough-day panel for 2024 by combining:
+
+1. **NYC Automated Traffic Volume Counts** (dataset `7ym2-wayt`) aggregated to borough-day.
+2. **NYC 311 Service Requests** (dataset `erm2-nwe9`) filtered to two complaint types (“Noise – Street/Sidewalk”, “Noise – Vehicle”) and aggregated to borough-day.
+
+Then I explore the relationship using:
+- Visual diagnostics (coverage timeline, scatter by borough, week-to-week co-movement),
+- Correlations (with confidence intervals),
+- A regression model controlling for borough and day-of-week effects.
+
+The key insight preview (expanded later): the correlation pattern is **not uniform across boroughs**, and the data itself has a major limitation—**traffic coverage is uneven across boroughs and time**—which affects how strongly we can generalize findings.
+
+---
+
+## Data Preparation
+```{r}
+## Data preparation
+
+library(httr2)
+library(jsonlite)
+library(dplyr)
+library(lubridate)
+library(readr)
+library(tibble)
+library(tidyr)
+
+soda_get <- function(endpoint, query, app_token = Sys.getenv("SODA_APP_TOKEN", "")) {
+  req <- request(endpoint) |> req_url_query(!!!query)
+  if (nzchar(app_token)) req <- req |> req_headers(`X-App-Token` = app_token)
+  resp <- req |> req_perform()
+  txt  <- resp |> resp_body_string()
+  fromJSON(txt, flatten = TRUE) |> as_tibble()
+}
+
+std_boro <- function(x) toupper(trimws(x))
+
+# -----------------------------
+# 1) TRAFFIC (2024) -> borough-day
+# Dataset: 7ym2-wayt
+# -----------------------------
+traffic_2024 <- soda_get(
+  "https://data.cityofnewyork.us/resource/7ym2-wayt.json",
+  list(
+    `$select` = paste(
+      "boro, yr, m, d,",
+      "sum(vol) as traffic_vol,",
+      "count(*) as records"
+    ),
+    `$where`  = "yr = 2024 AND vol IS NOT NULL AND vol >= 0",
+    `$group`  = "boro, yr, m, d",
+    `$limit`  = 200000
+  )
+) |>
+  mutate(
+    yr = as.integer(yr),
+    m  = as.integer(m),
+    d  = as.integer(d),
+    date = as.Date(sprintf("%04d-%02d-%02d", yr, m, d)),
+    borough = std_boro(boro),
+    traffic_vol = parse_number(traffic_vol),
+    records = as.integer(parse_number(records)),
+    traffic_per_record = traffic_vol / pmax(records, 1L)
+  ) |>
+  select(borough, date, traffic_vol, records, traffic_per_record) |>
+  arrange(borough, date)
+
+# -----------------------------
+# 2) 311 NOISE (2024) -> borough-day
+# Dataset: erm2-nwe9
+# Complaint types: Noise - Street/Sidewalk, Noise - Vehicle
+# -----------------------------
+noise_2024 <- soda_get(
+  "https://data.cityofnewyork.us/resource/erm2-nwe9.json",
+  list(
+    `$select` = "borough, date_trunc_ymd(created_date) as date, count(*) as noise_complaints",
+    `$where`  = paste(
+      "created_date >= '2024-01-01T00:00:00.000'",
+      "AND created_date <  '2025-01-01T00:00:00.000'",
+      "AND complaint_type IN ('Noise - Street/Sidewalk','Noise - Vehicle')",
+      "AND borough IS NOT NULL"
+    ),
+    `$group`  = "borough, date",
+    `$limit`  = 200000
+  )
+) |>
+  mutate(
+    date = as.Date(date),
+    borough = std_boro(borough),
+    noise_complaints = as.integer(parse_number(noise_complaints))
+  ) |>
+  select(borough, date, noise_complaints) |>
+  arrange(borough, date)
+
+# -----------------------------
+# 3) OPTION A PANEL
+# Keep ONLY traffic-observed days (no fake traffic zeros).
+# Fill missing noise to 0 (no complaints that day in that borough).
+# Add readable day-of-week factor.
+# -----------------------------
+panel_2024_A <- traffic_2024 |>
+  left_join(noise_2024, by = c("borough", "date")) |>
+  mutate(
+    noise_complaints = if_else(is.na(noise_complaints), 0L, noise_complaints),
+    dow = factor(wday(date, label = TRUE, week_start = 1), ordered = FALSE)
+  ) |>
+  filter(borough %in% c("BRONX","BROOKLYN","MANHATTAN","QUEENS","STATEN ISLAND")) |>
+  arrange(borough, date)
+
+# Quick sanity checks (so you can describe data coverage in your report)
+coverage_check <- panel_2024_A |>
+  group_by(borough) |>
+  summarise(
+    traffic_days = n(),
+    date_min = min(date),
+    date_max = max(date),
+    .groups = "drop"
+  )
+
+print(coverage_check)
+# View(traffic_2024); View(noise_2024); View(panel_2024_A)
+```
+For data preparation, I constructed a 2024 borough-day panel by combining two NYC Open Data sources: Automated Traffic Volume Counts (7ym2-wayt) and 311 Service Requests (erm2-nwe9). I aggregated traffic to borough-day (summing total volume and counting records) and created a normalized measure, **traffic_per_record**, to make days more comparable. I then filtered 311 to two noise-related complaint types (“Noise – Street/Sidewalk” and “Noise – Vehicle”), aggregated counts to borough-day, and joined the two datasets on **borough** and **date**. To avoid introducing bias from missing traffic sensor days, I kept **only traffic-observed days** (Option A) and set missing noise counts to zero after the join. A coverage check showed uneven traffic availability across boroughs (e.g., Brooklyn has the most observed days, while Staten Island is extremely sparse), which is important for interpreting borough comparisons.
+
+
+## Interpretation of Findings
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(lubridate)
+library(scales)
+library(broom)
+library(viridis)
+
+# Use only boroughs with meaningful traffic coverage
+plot_df <- panel_2024_A |>
+  filter(borough %in% c("BRONX","BROOKLYN","MANHATTAN","QUEENS")) |>
+  mutate(
+    dow = factor(wday(date, label = TRUE, week_start = 1), ordered = FALSE),
+    log_traffic = log1p(traffic_per_record),
+    log_noise   = log1p(noise_complaints)
+  )
+
+# --------------------------
+# Helper: Fisher-z CI for r
+# --------------------------
+cor_ci <- function(r, n, level = 0.95) {
+  if (is.na(r) || n < 4) return(c(NA_real_, NA_real_))
+  z <- atanh(r)
+  se <- 1 / sqrt(n - 3)
+  zcrit <- qnorm(1 - (1 - level) / 2)
+  c(tanh(z - zcrit * se), tanh(z + zcrit * se))
+}
+
+# Correlation table (computed on log1p values for stability)
+corr_df <- plot_df |>
+  group_by(borough) |>
+  summarise(
+    n_days = n(),
+    r = cor(log_traffic, log_noise, use = "complete.obs"),
+    .groups = "drop"
+  ) |>
+  rowwise() |>
+  mutate(
+    r_lo = cor_ci(r, n_days)[1],
+    r_hi = cor_ci(r, n_days)[2],
+    r_lab = sprintf("r=%.2f\n(n=%d)", r, n_days)
+  ) |>
+  ungroup()
+
+# ============================================================
+# GRAPH 1 — Coverage timeline (shows data limitation clearly)
+# ============================================================
+coverage_df <- plot_df |>
+  group_by(borough) |>
+  summarise(
+    date_min = min(date),
+    date_max = max(date),
+    traffic_days = n(),
+    .groups = "drop"
+  )
+
+g1_coverage <- ggplot(coverage_df, aes(y = reorder(borough, traffic_days))) +
+  geom_segment(aes(x = date_min, xend = date_max, yend = borough, color = traffic_days),
+               linewidth = 6, alpha = 0.8, lineend = "round") +
+  geom_text(aes(x = date_max, label = paste0("  n=", traffic_days)),
+            hjust = 0, size = 4) +
+  scale_color_viridis_c(option = "C") +
+  scale_x_date(date_breaks = "2 months", date_labels = "%b") +
+  labs(
+    title = "Graph 1: Traffic Data Coverage by Borough (2024)",
+    subtitle = "Traffic-observed days are uneven (important limitation)",
+    x = NULL, y = NULL, color = "Traffic days"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom") +
+  expand_limits(x = max(coverage_df$date_max) + 25)
+
+g1_coverage
+```
+### 1) Data coverage is uneven (Graph 1)
+
+Before interpreting relationships, the coverage visualization highlights a key limitation: **traffic-observed days differ substantially across boroughs**, and the observed date ranges are not identical. In 2024, **Brooklyn has the most traffic coverage** among the boroughs included, while the **Bronx has fewer observed days**, and **Staten Island has extremely sparse coverage**.
+
+This matters because correlation and regression estimates can be sensitive to:
+
+- **How many days are included** (sample size),
+- **Which months are represented** (seasonality),
+- **Whether traffic sensors/records capture comparable geography**.
+
+As a result, I treat borough comparisons as **informative but not definitive**. Brooklyn’s near-zero correlation, for example, is based on a larger set of observed days than the Bronx.
+
+```{r}
+# ============================================================
+# GRAPH 2 — Facet scatter (log1p) colored by Day-of-Week
+# ============================================================
+ann_df <- corr_df |>
+  select(borough, r_lab)
+
+g2_scatter <- ggplot(plot_df, aes(x = log_traffic, y = log_noise, color = dow)) +
+  geom_point(alpha = 0.35, size = 1.8) +
+  geom_smooth(method = "lm", se = TRUE, linewidth = 1, color = "black") +
+  facet_wrap(~ borough, ncol = 2) +
+  geom_text(
+    data = ann_df,
+    aes(x = Inf, y = -Inf, label = r_lab),
+    inherit.aes = FALSE,
+    hjust = 1.05, vjust = -0.35, size = 4, fontface = "bold"
+  ) +
+  scale_color_viridis_d(option = "D", end = 0.9) +
+  labs(
+    title = "Graph 2: Traffic vs Noise Complaints by Borough (2024)",
+    subtitle = "Each point is a borough-day • Both axes are log(1 + x) • Color = day-of-week",
+    x = "log(1 + traffic per record)",
+    y = "log(1 + noise complaints)",
+    color = "Day of week"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom")
+
+g2_scatter
+```
+### 2) Relationship patterns differ by borough (Graph 2)
+
+The faceted scatter plot (**log(1+x)** vs **log(1+x)**) shows that the relationship between traffic and noise complaints is **not consistent**:
+
+- **Bronx:** The fitted line slopes upward more clearly than in other boroughs, and the displayed correlation is moderately positive.  
+- **Manhattan:** The relationship is also positive, although more diffuse.  
+- **Brooklyn and Queens:** The fitted relationship is close to flat, suggesting little association in this dataset/time window.
+
+Day-of-week coloring indicates that weekday/weekend patterns exist, but the day-of-week separation is not strong enough by itself to explain the borough-level differences.
+
+```{r}
+# ============================================================
+# GRAPH 3 — Correlation forest plot (95% CI), colored by sign
+# ============================================================
+corr_df2 <- corr_df |>
+  mutate(sign = if_else(r >= 0, "Positive", "Negative"))
+
+g3_corr_forest <- ggplot(corr_df2, aes(y = reorder(borough, r), x = r, color = sign)) +
+  geom_vline(xintercept = 0, linewidth = 1, alpha = 0.7) +
+  geom_errorbarh(aes(xmin = r_lo, xmax = r_hi), height = 0.25, linewidth = 1) +
+  geom_point(aes(size = n_days), alpha = 0.9) +
+  scale_color_viridis_d(option = "A", end = 0.8) +
+  scale_size(range = c(3, 7), guide = "none") +
+  labs(
+    title = "Graph 3: Correlation Summary by Borough (2024)",
+    subtitle = "Correlation computed on log(1+x) values • 95% CI shown",
+    x = "Correlation (r)",
+    y = NULL,
+    color = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom")
+
+g3_corr_forest
+```
+### 3) Uncertainty confirms “mixed evidence” (Graph 3)
+
+The correlation forest plot adds uncertainty using a **95% CI** (via Fisher’s z transform). The main takeaway is that borough-level correlations vary, and **some confidence intervals overlap with zero**.
+
+A practical interpretation is: there is **not one single citywide “traffic → noise” relationship** that holds equally everywhere. Instead, the relationship appears **borough-dependent**, which is plausible because street composition, density, enforcement, and resident reporting patterns differ.
+
+```{r}
+# ============================================================
+# GRAPH 4 — Weekly standardized co-movement (z-scores)
+# ============================================================
+weekly_z <- plot_df |>
+  mutate(week = floor_date(date, "week", week_start = 1)) |>
+  group_by(borough, week) |>
+  summarise(
+    noise_week = sum(noise_complaints, na.rm = TRUE),
+    traffic_week = mean(traffic_per_record, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  group_by(borough) |>
+  mutate(
+    noise_z = as.numeric(scale(noise_week)),
+    traffic_z = as.numeric(scale(traffic_week))
+  ) |>
+  ungroup() |>
+  pivot_longer(cols = c(noise_z, traffic_z),
+               names_to = "series", values_to = "z") |>
+  mutate(series = recode(series,
+                         noise_z = "Noise (weekly sum, z-score)",
+                         traffic_z = "Traffic (weekly mean, z-score)"))
+
+g4_weekly <- ggplot(weekly_z, aes(x = week, y = z, color = series)) +
+  geom_hline(yintercept = 0, linewidth = 0.8, alpha = 0.7) +
+  geom_line(linewidth = 1.2) +
+  facet_wrap(~ borough, ncol = 2) +
+  scale_color_viridis_d(option = "C", end = 0.85) +
+  scale_x_date(date_breaks = "2 months", date_labels = "%b") +
+  labs(
+    title = "Graph 4: Weekly Co-Movement (Standardized within Borough)",
+    subtitle = "Both series are converted to z-scores so you can compare shapes",
+    x = "Week",
+    y = "z-score (within borough)",
+    color = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom")
+
+g4_weekly
+```
+### 4) Weekly co-movement is not stable (Graph 4)
+
+Graph 4 converts weekly series to within-borough **z-scores** so the shapes are comparable. If traffic and noise complaints moved together strongly, we would expect the two standardized lines to rise and fall together.
+
+Instead, the co-movement is mixed:
+
+- Some periods show aligned movement,
+- Other periods show divergence,
+- The overall story is not “tight tracking.”
+
+This supports the idea that traffic volume alone is not the main driver of these complaint counts, at least as measured here.
+
+```{r}
+# ============================================================
+# GRAPH 5 — Regression coefficient plot (clean + colorful)
+# ============================================================
+model_dow <- lm(noise_complaints ~ traffic_per_record + borough + dow, data = plot_df)
+
+coef_df <- broom::tidy(model_dow, conf.int = TRUE) |>
+  filter(term %in% c("traffic_per_record",
+                     "boroughBROOKLYN","boroughMANHATTAN","boroughQUEENS")) |>
+  mutate(
+    term_pretty = recode(term,
+      traffic_per_record = "Traffic per record",
+      boroughBROOKLYN = "Brooklyn vs Bronx",
+      boroughMANHATTAN = "Manhattan vs Bronx",
+      boroughQUEENS = "Queens vs Bronx"
+    ),
+    group = if_else(term == "traffic_per_record", "Traffic effect", "Borough effect")
+  )
+
+g5_coef <- ggplot(coef_df, aes(y = reorder(term_pretty, estimate), x = estimate, color = group)) +
+  geom_vline(xintercept = 0, linewidth = 1, alpha = 0.7) +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.25, linewidth = 1) +
+  geom_point(size = 4, alpha = 0.95) +
+  scale_color_viridis_d(option = "B", end = 0.8) +
+  labs(
+    title = "Graph 5: Regression Effects (95% CI)",
+    subtitle = "Noise complaints ~ Traffic + Borough + Day-of-Week",
+    x = "Estimated effect on daily noise complaints",
+    y = NULL,
+    color = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom")
+
+g5_coef
+```
+
+### 5) Regression suggests the traffic effect is small after controls (Graph 5)
+
+The regression model includes:
+
+- `traffic_per_record` (continuous),
+- borough fixed differences (relative to Bronx),
+- day-of-week effects.
+
+In the coefficient plot, the `traffic_per_record` effect appears close to zero compared to borough contrasts. Meanwhile, borough differences (e.g., Manhattan vs Bronx) are large and positive in this model specification.
+
+A reasonable interpretation is:
+
+- Differences in baseline reporting levels across boroughs (and systematic borough characteristics) may dominate,
+- The marginal contribution of “traffic per record” is small once borough identity and day-of-week are controlled.
+
+This does not prove traffic has no role in noise; rather, it suggests that within the structure of this dataset and aggregation, traffic’s incremental association is weak relative to other factors.
+
+---
+
+## Limitations
+
+This analysis is informative but has meaningful limitations:
+
+1. **Traffic coverage is incomplete and uneven.** Some boroughs have many more observed days than others, and date ranges differ. This could bias correlations if high-traffic seasons are overrepresented in one borough relative to another.  
+2. **Aggregation hides spatial detail.** Borough-day is a large unit. Traffic may be concentrated in specific corridors (e.g., near highways, bridges), while complaints may concentrate in residential zones. Aggregating to borough level can wash out neighborhood-scale relationships.  
+3. **311 complaints measure reporting, not only noise.** Complaint counts depend on residents’ likelihood of reporting, awareness of 311, trust in response, and enforcement expectations. Therefore, complaint counts are not a direct physical measurement of decibel levels.  
+4. **Only two complaint types included.** “Noise - Street/Sidewalk” and “Noise - Vehicle” are relevant, but other complaint categories (e.g., disorder, blocked driveway, illegal parking) might capture traffic-related quality-of-life impacts differently.  
+5. **Potential confounders not modeled.** Weather, holidays, events, construction seasons, and policing/enforcement intensity could influence both traffic patterns and complaint volumes.
+
+---
+
+## Challenges and Lessons Learned
+During development, the biggest challenge was **data coverage and alignment across sources**. The traffic dataset does not provide complete daily coverage for every borough, and the observed date ranges differ substantially across boroughs. This created a risk that borough comparisons could reflect **differences in which months were observed**, rather than true behavioral differences.
+
+A second challenge was designing the panel structure without introducing bias. If I had created a “full calendar” of dates and filled missing traffic with zeros, it would have implied **zero traffic on days with no sensor observations**, which is not a valid assumption. To avoid this, I used **Option A** and restricted the analysis to traffic-observed days, while treating missing noise complaint counts as **zero** (no complaints recorded that day for that borough).
+
+Finally, I needed to balance interpretability with stability in the analysis. Daily complaint counts and traffic measures are skewed, so I used **log(1 + x)** transformations for correlations and visualization. Overall, these challenges reinforced the importance of carefully checking coverage, avoiding artificial data imputation, and communicating uncertainty clearly.
+
+---
+
+## Conclusion
+
+**Do higher traffic volumes correlate with more noise complaints across boroughs?**
+
+:::{.callout-note title="Answer" appearance="simple"}
+Based on the 2024 borough-day panel built from NYC Open Data: The relationship between traffic and noise complaints is **not consistent across boroughs**. In some boroughs (notably the Bronx and Manhattan in this dataset), there is a **modest positive association** between traffic intensity and noise complaint counts. In others (Brooklyn and Queens), the association is **near zero**. After controlling for borough differences and day-of-week in a regression framework, the estimated traffic effect is **small relative to borough-level differences**.
+:::
+
+**Overall interpretation:** higher traffic does not reliably correspond to higher noise complaints in a uniform citywide way, at least at the borough-day level of aggregation and given uneven traffic coverage. The results suggest that borough context and reporting patterns matter substantially, and future work should explore finer geographic resolution (e.g., community district or neighborhood) and broader complaint categories to better capture traffic-related quality-of-life impacts.
+
+
